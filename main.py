@@ -190,3 +190,31 @@ if __name__ == "__main__":
         poll_interval=1.0,
         timeout=10
     )
+
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route("/")
+def health_check():
+    return "Bot is alive and polling! 🚀", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+if __name__ == "__main__":
+    # Запускаем Flask в фоне
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Запускаем polling
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        poll_interval=1.0,
+        timeout=10
+    )
+
