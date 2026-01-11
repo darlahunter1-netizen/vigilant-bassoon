@@ -1,22 +1,26 @@
 import logging
 import random
 import sqlite3
+import asyncio
 from datetime import datetime, timedelta
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = "8356905419:AAHWfxbaCn_vEfg2AC0Q9KWS9m1OiyL-gp8"  # ← твой токен (перемести в Secrets для безопасности)
+TOKEN = "8356905419:AAHWfxbaCn_vEfg2AC0Q9KWS9m1OiyL-gp8"  # ← твой токен (лучше в Secrets)
 
-GROUP_CHAT_ID = -1001234567890  # ← ЗАМЕНИ на ID своей группы (узнай через @getidsbot)
+GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
 
-ADMIN_ID = 123456789  # ← ЗАМЕНИ на свой Telegram ID
+ADMIN_ID = 998091317  # ← ЗАМЕНИ на свой ID
 
 DB_FILE = "users.db"
 # ===================================================
 
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 application = Application.builder().token(TOKEN).build()
@@ -92,7 +96,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode="HTML",
         )
     except Exception as e:
-        logger.error(f"Не удалось отправить капчу {user.id}: {e}")
+        logger.error(f"Ошибка отправки капчи {user.id}: {e}")
         await context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
 
 async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -122,14 +126,14 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
         add_user(user.id, user.username or "None", user.full_name)
 
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start в чате со мной", url=f"t.me/{(await context.bot.get_me()).username}")]])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"t.me/{(await context.bot.get_me()).username}")]])
         await query.edit_message_text(
-            "✅ Капча пройдена! Вы добавлены в группу.\n\nЧтобы получать персональные уведомления, нажмите кнопку ниже и отправьте /start.",
+            "✅ Пройдено! Вы в группе.\n\nЧтобы получать сообщения, нажмите кнопку и отправьте /start.",
             reply_markup=keyboard
         )
     else:
         await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
-        await query.edit_message_text("❌ Неправильно. Заявка отклонена.")
+        await query.edit_message_text("❌ Неправильно.")
 
     del pending_requests[user_id]
 
@@ -148,29 +152,27 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Использование: /broadcast Твой текст рассылки")
+        await update.message.reply_text("Использование: /broadcast текст")
         return
 
     text = " ".join(context.args)
     user_ids = get_all_user_ids()
-    success = 0
-    failed = 0
+    success = failed = 0
 
-    await update.message.reply_text(f"Начинаю рассылку {len(user_ids)} пользователям...")
+    await update.message.reply_text(f"Рассылка {len(user_ids)} пользователям...")
 
     for uid in user_ids:
         try:
-            await context.bot.send_message(chat_id=uid, text=text, disable_web_page_preview=True)
+            await context.bot.send_message(chat_id=uid, text=text)
             success += 1
         except Exception as e:
             logger.warning(f"Не удалось отправить {uid}: {e}")
             failed += 1
-
-        await asyncio.sleep(0.05)  # Чтобы не превысить лимиты Telegram (~20 сообщений в секунду)
+        await asyncio.sleep(0.05)  # Анти-флуд
 
     await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
 
-# Регистрация обработчиков
+# ==================== РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ ====================
 application.add_handler(ChatJoinRequestHandler(handle_join_request))
 application.add_handler(CallbackQueryHandler(captcha_callback, pattern=r"^captcha_"))
 application.add_handler(CommandHandler("start", start))
@@ -179,31 +181,6 @@ application.add_handler(CommandHandler("broadcast", broadcast))
 
 init_db()
 
-
-# ... (весь твой код polling, handlers, init_db и т.д. остаётся выше)
-
-# Минимальный Flask-сервер для Replit health check
-app = Flask(__name__)
-
-@app.route("/")
-def health_check():
-    return "Bot is alive and polling! 🚀", 200
-
+# ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    # Запуск Flask в отдельном потоке (чтобы не блокировать polling)
-    from threading import Thread
-
-    def run_flask():
-        port = int(os.environ.get("PORT", 5000))
-        app.run(host="0.0.0.0", port=port, debug=False)
-
-    # Запускаем Flask в фоне
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    # Запускаем polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-
