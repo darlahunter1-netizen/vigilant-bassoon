@@ -2,6 +2,7 @@ import logging
 import random
 import sqlite3
 import os
+import asyncio
 from datetime import datetime, timedelta
 from threading import Thread
 
@@ -22,7 +23,7 @@ if not TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN не найден в Secrets!")
 
 GROUP_CHAT_ID = -1003431090434  # ← свой ID группы
-ADMIN_ID = 998091317            # ← свой ID (исправил опечатку)
+ADMIN_ID = 998091317            # ← свой ID
 
 DB_FILE = "users.db"
 
@@ -115,7 +116,6 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Ошибка отправки капчи {user.id}: {e}")
         await context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
 
-
 async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -140,34 +140,41 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if chosen == info["answer"]:
-        await context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
         add_user(user_id, query.from_user.username, query.from_user.full_name)
 
-        me = await context.bot.get_me()
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"https://t.me/{me.username}?start")]])
-
-        await query.edit_message_text(
-            "✅ Пройдено! Вы в группе.\n\nЧтобы получать уведомления, нажмите кнопку и отправьте /start.",
-            reply_markup=keyboard
+        welcome_text = (
+            "🎉 <b>Поздравляем!</b> 🎉\n\n"
+            "Ваша заявка успешно прошла проверку и <b>находится в обработке</b>!\n\n"
+            "Мы проверим её в ближайшее время и добавим вас в сообщество 🚀\n"
+            "Пока ждёте — держите мотивацию!"
         )
+
+        # Картинка для ожидания (progress/motivation)
+        photo_url = "https://assets.justinmind.com/wp-content/uploads/2024/10/progress-bar-ui-heading-768x492.png"
+
+        await context.bot.send_photo(
+            chat_id=user_id,
+            photo=photo_url,
+            caption=welcome_text,
+            parse_mode="HTML"
+        )
+
+        await query.edit_message_text("✅ Капча пройдена! Заявка в обработке.")
     else:
         await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
         await query.edit_message_text("❌ Неправильно.")
 
     del pending_requests[user_id]
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username, user.full_name)
     await update.message.reply_text("Привет! Теперь я могу писать тебе персональные сообщения.")
 
-
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text(f"Собрано пользователей: {get_users_count()}")
-
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -193,7 +200,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
 
-
 # ==================== ГЛОБАЛЬНОЕ ПРИЛОЖЕНИЕ ====================
 application = Application.builder().token(TOKEN).build()
 
@@ -205,25 +211,16 @@ application.add_handler(CommandHandler("broadcast", broadcast))
 
 init_db()
 
-
-# ... весь остальной код остаётся прежним (импорты, настройки, handlers, Flask, функции и т.д.) ...
-
-import asyncio
-
-# ==================== ПОЛЛИНГ В ОТДЕЛЬНОМ ПОТОКЕ С СОБСТВЕННЫМ EVENT LOOP ====================
+# ==================== ПОЛЛИНГ В ФОНЕ ====================
 def run_polling():
     logger.info("Запуск Telegram polling в фоновом потоке с новым event loop")
     
-    # Создаём новый event loop специально для этого потока
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     try:
-        # Запускаем polling синхронно внутри этого loop
         loop.run_until_complete(application.initialize())
         loop.run_until_complete(application.start())
-        
-        # Бесконечный цикл polling (аналог run_polling, но вручную)
         loop.run_forever()
     except Exception as e:
         logger.error(f"Polling упал: {e}")
@@ -232,17 +229,11 @@ def run_polling():
         loop.run_until_complete(application.shutdown())
         loop.close()
 
-
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    init_db()
-
-    # Запускаем polling в фоне
     polling_thread = Thread(target=run_polling, daemon=True)
     polling_thread.start()
 
-    # Flask — основной процесс (Replit Autoscale этого ждёт)
-    port = int(os.environ.get("PORT", 8080))  # Replit сам подставит нужный порт
+    port = int(os.environ.get("PORT", 8080))
     logger.info(f"Flask стартует на порту {port}")
     flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
