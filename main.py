@@ -4,37 +4,40 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 
-from flask import Flask, request, abort
+from flask import Flask, request, abort, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
 
+app = Flask(__name__)
+
 # ==================== НАСТРОЙКИ ====================
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")  # ← добавь в Secrets!
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
 
-ADMIN_ID = 998091317  # ← ЗАМЕНИ на свой Telegram ID
+ADMIN_ID = 998091317  # ← ЗАМЕНИ НА СВОЙ ID
 
-WEBHOOK_SECRET = "supersecret1234567890"  # ← можно оставить или изменить (длинный случайный)
+WEBHOOK_SECRET = "x7K9pL2mN8qR5vT3wY6zA1cE4fG9hJ0kB2dF5gH8jM3nP6rT9uV1wX4yZ7aC0eD2fG5hJ8kL1mN3pQ6rT9uV0wX2yZ4aC7dE"
 
 DB_FILE = "users.db"
 # ===================================================
 
-app = Flask(__name__)
-
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация Telegram Application
+# Инициализация Telegram
 application = None
 if TOKEN:
-    application = Application.builder().token(TOKEN).build()
-    # Обязательная инициализация и запуск (фиксит RuntimeError)
-    application.initialize()
-    application.start()
-    logger.info("Telegram bot initialized and started")
+    try:
+        application = Application.builder().token(TOKEN).build()
+        application.initialize()
+        application.start()
+        logger.info("Telegram bot initialized and started")
+    except Exception as e:
+        logger.error(f"Telegram init error: {e}")
+        application = None
 else:
-    logger.warning("TELEGRAM_BOT_TOKEN not found in Secrets")
+    logger.warning("No TELEGRAM_BOT_TOKEN in Secrets")
 
 # База данных
 def init_db():
@@ -82,6 +85,8 @@ def generate_captcha():
     return a, b, a + b, f"{a} + {b} = ?"
 
 def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not application:
+        return
     request = update.chat_join_request
     user = request.from_user
     chat = request.chat
@@ -111,6 +116,8 @@ def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
 
 def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not application:
+        return
     query = update.callback_query
 
     data = query.data.split("_")
@@ -121,7 +128,7 @@ def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = int(data[2])
 
     if user_id != query.from_user.id or user_id not in pending_requests:
-        query.edit_message_text("Ошибка или время вышло.")
+        query.edit_message_text("Ошибка.")
         return
 
     info = pending_requests[user_id]
@@ -147,7 +154,7 @@ def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username or "None", user.full_name)
-    update.message.reply_text("Привет! Теперь я могу писать тебе.")
+    update.message.reply_text("Привет! Теперь могу писать тебе.")
 
 def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -186,7 +193,7 @@ if application:
 @app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     if application is None:
-        return "Telegram отключён - нет токена", 503
+        return "Telegram отключён", 503
 
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         abort(403)
@@ -198,8 +205,8 @@ def webhook():
 @app.route("/")
 def index():
     if application is None:
-        return "Сервер работает, но Telegram отключён (добавь TELEGRAM_BOT_TOKEN в Secrets)"
-    return "Бот работает!"
+        return jsonify({"status": "ok", "message": "Сервер работает, но Telegram отключён (добавь TELEGRAM_BOT_TOKEN в Secrets)"}), 200
+    return jsonify({"status": "ok", "message": "Бот работает!"}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
