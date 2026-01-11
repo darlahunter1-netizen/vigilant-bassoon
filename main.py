@@ -8,7 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = "8356905419:AAHWfxbaCn_vEfg2AC0Q9KWS9m1OiyL-gp8"  # ← твой токен
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # ← Добавь в Secrets!
 
 GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
 
@@ -23,6 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Инициализация
 application = Application.builder().token(TOKEN).build()
 
 # ==================== БАЗА ДАННЫХ ====================
@@ -128,7 +129,7 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"t.me/{(await context.bot.get_me()).username}")]])
         await query.edit_message_text(
-            "✅ Пройдено! Вы в группе.\n\nЧтобы получать персональные сообщения, нажмите кнопку и отправьте /start.",
+            "✅ Пройдено! Вы в группе.\n\nЧтобы получать уведомления, нажмите кнопку и отправьте /start.",
             reply_markup=keyboard
         )
     else:
@@ -152,7 +153,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Использование: /broadcast Твой текст")
+        await update.message.reply_text("Использование: /broadcast Текст рассылки")
         return
 
     text = " ".join(context.args)
@@ -168,11 +169,11 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Не удалось отправить {uid}: {e}")
             failed += 1
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.05)  # Анти-флуд
 
     await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
 
-# ==================== РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ ====================
+# ==================== РЕГИСТРАЦИЯ ====================
 application.add_handler(ChatJoinRequestHandler(handle_join_request))
 application.add_handler(CallbackQueryHandler(captcha_callback, pattern=r"^captcha_"))
 application.add_handler(CommandHandler("start", start))
@@ -189,35 +190,3 @@ if __name__ == "__main__":
         poll_interval=1.0,
         timeout=10
     )
-
-# ... (весь твой код polling, handlers, init_db, функции выше остаются без изменений)
-
-# Добавь это в конец файла (после всех async функций)
-
-from flask import Flask
-import threading
-
-app = Flask(__name__)
-
-@app.route("/")
-def health_check():
-    return "Bot is alive and polling! 🚀", 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке (чтобы не блокировать polling)
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    # Запускаем polling
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
-        poll_interval=1.0,
-        timeout=10
-    )
-
