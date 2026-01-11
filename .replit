@@ -1,11 +1,1 @@
-modules = ["python-3.12"]
-[agent]
-expertMode = true
-
-[nix]
-channel = "stable-25_05"
-
-[deployment]
-build = ["sh", "-c", "pip install -r requirements.txt"]
-run = ["sh", "-c", "python main.py"]
-deploymentTarget = "cloudrun"
+run = "python main.py"
