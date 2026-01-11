@@ -1,21 +1,30 @@
 import logging
 import random
 import sqlite3
-import asyncio
+import os
 from datetime import datetime, timedelta
+from threading import Thread
+
+from flask import Flask
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
+from telegram.ext import (
+    Application,
+    ContextTypes,
+    CommandHandler,
+    CallbackQueryHandler,
+    ChatJoinRequestHandler,
+)
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # ← Добавь в Secrets!
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN не найден в Secrets!")
 
-GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
-
-ADMIN_ID = 99809131  # ← ЗАМЕНИ на свой ID
+GROUP_CHAT_ID = -1003431090434  # ← свой ID группы
+ADMIN_ID = 998091317            # ← свой ID (исправил опечатку)
 
 DB_FILE = "users.db"
-# ===================================================
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -23,8 +32,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Инициализация
-application = Application.builder().token(TOKEN).build()
+# ==================== FLASK (главный процесс) ====================
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def health():
+    return "Bot is alive! 🚀", 200
 
 # ==================== БАЗА ДАННЫХ ====================
 def init_db():
@@ -39,7 +52,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_user(user_id: int, username: str, full_name: str):
+def add_user(user_id: int, username: str | None, full_name: str):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO users (user_id, username, full_name, joined_at) VALUES (?, ?, ?, ?)",
@@ -69,8 +82,11 @@ pending_requests = {}
 def generate_captcha():
     a = random.randint(1, 10)
     b = random.randint(1, 10)
-    return a, b, a + b, f"{a} + {b} = ?"
+    answer = a + b
+    question = f"{a} + {b} = ?"
+    return question, answer
 
+# ==================== ОБРАБОТЧИКИ ====================
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request = update.chat_join_request
     user = request.from_user
@@ -79,12 +95,11 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     if chat.id != GROUP_CHAT_ID:
         return
 
-    a, b, answer, question = generate_captcha()
+    question, answer = generate_captcha()
     options = [answer, answer + random.randint(1, 5), answer - random.randint(1, 5)]
     random.shuffle(options)
 
     keyboard = [[InlineKeyboardButton(str(opt), callback_data=f"captcha_{opt}_{user.id}")] for opt in options]
-    reply_markup = InlineKeyboardMarkup(keyboard)
 
     expires = datetime.now() + timedelta(minutes=5)
     pending_requests[user.id] = {"expires": expires, "answer": answer, "chat_id": chat.id}
@@ -93,12 +108,13 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         await context.bot.send_message(
             chat_id=user.id,
             text=f"Чтобы вступить в <b>{chat.title}</b>, решите задачу:\n\n<b>{question}</b>\n\nУ вас 5 минут.",
-            reply_markup=reply_markup,
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML",
         )
     except Exception as e:
         logger.error(f"Ошибка отправки капчи {user.id}: {e}")
         await context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
+
 
 async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -116,42 +132,46 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     info = pending_requests[user_id]
+
     if datetime.now() > info["expires"]:
         await query.edit_message_text("⏰ Время истекло.")
-        del pending_requests[user_id]
         await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
+        del pending_requests[user_id]
         return
 
-    user = query.from_user
     if chosen == info["answer"]:
-        await context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
-        add_user(user.id, user.username or "None", user.full_name)
+        await context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
+        add_user(user_id, query.from_user.username, query.from_user.full_name)
 
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"t.me/{(await context.bot.get_me()).username}")]])
+        me = await context.bot.get_me()
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"https://t.me/{me.username}?start")]])
+
         await query.edit_message_text(
             "✅ Пройдено! Вы в группе.\n\nЧтобы получать уведомления, нажмите кнопку и отправьте /start.",
             reply_markup=keyboard
         )
     else:
-        await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
+        await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
         await query.edit_message_text("❌ Неправильно.")
 
     del pending_requests[user_id]
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    add_user(user.id, user.username or "None", user.full_name)
+    add_user(user.id, user.username, user.full_name)
     await update.message.reply_text("Привет! Теперь я могу писать тебе персональные сообщения.")
+
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text(f"Собрано пользователей: {get_users_count()}")
 
+
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-
     if not context.args:
         await update.message.reply_text("Использование: /broadcast Текст рассылки")
         return
@@ -173,7 +193,10 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
 
-# ==================== РЕГИСТРАЦИЯ ====================
+
+# ==================== ГЛОБАЛЬНОЕ ПРИЛОЖЕНИЕ ====================
+application = Application.builder().token(TOKEN).build()
+
 application.add_handler(ChatJoinRequestHandler(handle_join_request))
 application.add_handler(CallbackQueryHandler(captcha_callback, pattern=r"^captcha_"))
 application.add_handler(CommandHandler("start", start))
@@ -182,38 +205,25 @@ application.add_handler(CommandHandler("broadcast", broadcast))
 
 init_db()
 
+
+# ==================== ПОЛЛИНГ В ФОНЕ ====================
+def run_polling():
+    logger.info("Telegram polling запущен в фоновом потоке")
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        poll_interval=1.0,
+        timeout=10
+    )
+
+
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
-        poll_interval=1.0,
-        timeout=10
-    )
+    # Запускаем polling в отдельном потоке
+    polling_thread = Thread(target=run_polling, daemon=True)
+    polling_thread.start()
 
-from flask import Flask
-import threading
-
-app = Flask(__name__)
-
-@app.route("/")
-def health_check():
-    return "Bot is alive and polling! 🚀", 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-if __name__ == "__main__":
-    # Запускаем Flask в фоне
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    # Запускаем polling
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
-        poll_interval=1.0,
-        timeout=10
-    )
+    # Flask — основной процесс (Replit Autoscale этого ждёт)
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"Flask стартует на порту {port}")
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
