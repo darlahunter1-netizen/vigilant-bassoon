@@ -14,9 +14,9 @@ from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQuer
 # ==================== НАСТРОЙКИ ====================
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # ← добавь в Secrets!
 
-GROUP_CHAT_ID = -100XXXXXXXXXXXXXX  # ← ЗАМЕНИ
+GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
 
-ADMIN_ID = 123456789  # ← ЗАМЕНИ
+ADMIN_ID = 99809131  # ← ЗАМЕНИ
 
 DB_FILE = "users.db"
 # ===================================================
@@ -208,3 +208,4 @@ if __name__ == "__main__":
         poll_interval=1.0,
         timeout=10
     )
+
