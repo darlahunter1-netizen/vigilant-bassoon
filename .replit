@@ -1,1 +1,4 @@
 run = "python main.py"
+
+[deployment]
+run = "python main.py"
