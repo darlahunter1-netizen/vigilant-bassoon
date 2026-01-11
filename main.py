@@ -181,7 +181,29 @@ init_db()
 
 application.run_polling()  # ← Polling вместо webhook
 
+# ... (весь твой код polling, handlers, init_db и т.д. остаётся выше)
+
+# Минимальный Flask-сервер для Replit health check
+app = Flask(__name__)
+
 @app.route("/")
-def index():
-    return "Bot is alive! 🚀", 200
+def health_check():
+    return "Bot is alive and polling! 🚀", 200
+
+if __name__ == "__main__":
+    # Запуск Flask в отдельном потоке (чтобы не блокировать polling)
+    from threading import Thread
+
+    def run_flask():
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port, debug=False)
+
+    # Запускаем Flask в фоне
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Запускаем polling
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
