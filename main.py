@@ -2,13 +2,12 @@ import logging
 import random
 import sqlite3
 import os
+import asyncio
 from datetime import datetime, timedelta
 
-from flask import Flask, request, abort, jsonify
+from flask import Flask, request, abort
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
-
-app = Flask(__name__)
 
 # ==================== НАСТРОЙКИ ====================
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -22,17 +21,23 @@ WEBHOOK_SECRET = "x7K9pL2mN8qR5vT3wY6zA1cE4fG9hJ0kB2dF5gH8jM3nP6rT9uV1wX4yZ7aC0e
 DB_FILE = "users.db"
 # ===================================================
 
+app = Flask(__name__)
+
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация Telegram
 application = None
 if TOKEN:
     try:
         application = Application.builder().token(TOKEN).build()
-        application.initialize()
-        application.start()
-        logger.info("Telegram bot initialized and started")
+
+        # Асинхронная инициализация и запуск (фиксит RuntimeWarning)
+        async def init_bot():
+            await application.initialize()
+            await application.start()
+            logger.info("Telegram bot initialized and started")
+
+        asyncio.run(init_bot())  # ← Запускаем асинхронно
     except Exception as e:
         logger.error(f"Telegram init error: {e}")
         application = None
@@ -177,7 +182,7 @@ def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             success += 1
         except:
             failed += 1
-    update.message.reply_text(f"Рассылка: {success} ок, {failed} ошибок")
+    update.message.reply_text(f"Готово! Успешно: {success}, Не удалось: {failed}")
 
 # Регистрация обработчиков
 if application:
@@ -205,11 +210,9 @@ def webhook():
 @app.route("/")
 def index():
     if application is None:
-        return jsonify({"status": "ok", "message": "Сервер работает, но Telegram отключён (добавь TELEGRAM_BOT_TOKEN в Secrets)"}), 200
-    return jsonify({"status": "ok", "message": "Бот работает!"}), 200
+        return "Сервер работает, но Telegram отключён (добавь TELEGRAM_BOT_TOKEN в Secrets)"
+    return "Бот работает!"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
