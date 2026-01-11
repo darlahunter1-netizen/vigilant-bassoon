@@ -1,50 +1,27 @@
 import logging
 import random
 import sqlite3
-import os
-import asyncio
 from datetime import datetime, timedelta
 
-from flask import Flask, request, abort
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TOKEN = "8356905419:AAHWfxbaCn_vEfg2AC0Q9KWS9m1OiyL-gp8"  # ← твой токен (перемести в Secrets для безопасности)
 
-GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
+GROUP_CHAT_ID = -1001234567890  # ← ЗАМЕНИ на ID своей группы (узнай через @getidsbot)
 
-ADMIN_ID = 998091317  # ← ЗАМЕНИ НА СВОЙ ID
-
-WEBHOOK_SECRET = "x7K9pL2mN8qR5vT3wY6zA1cE4fG9hJ0kB2dF5gH8jM3nP6rT9uV1wX4yZ7aC0eD2fG5hJ8kL1mN3pQ6rT9uV0wX2yZ4aC7dE"
+ADMIN_ID = 123456789  # ← ЗАМЕНИ на свой Telegram ID
 
 DB_FILE = "users.db"
 # ===================================================
 
-app = Flask(__name__)
-
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-application = None
-if TOKEN:
-    try:
-        application = Application.builder().token(TOKEN).build()
+application = Application.builder().token(TOKEN).build()
 
-        # Асинхронная инициализация и запуск (фиксит RuntimeWarning)
-        async def init_bot():
-            await application.initialize()
-            await application.start()
-            logger.info("Telegram bot initialized and started")
-
-        asyncio.run(init_bot())  # ← Запускаем асинхронно
-    except Exception as e:
-        logger.error(f"Telegram init error: {e}")
-        application = None
-else:
-    logger.warning("No TELEGRAM_BOT_TOKEN in Secrets")
-
-# База данных
+# ==================== БАЗА ДАННЫХ ====================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -81,7 +58,7 @@ def get_users_count():
     conn.close()
     return count
 
-# Капча
+# ==================== КАПЧА ====================
 pending_requests = {}
 
 def generate_captcha():
@@ -89,9 +66,7 @@ def generate_captcha():
     b = random.randint(1, 10)
     return a, b, a + b, f"{a} + {b} = ?"
 
-def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not application:
-        return
+async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request = update.chat_join_request
     user = request.from_user
     chat = request.chat
@@ -110,20 +85,19 @@ def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_requests[user.id] = {"expires": expires, "answer": answer, "chat_id": chat.id}
 
     try:
-        context.bot.send_message(
+        await context.bot.send_message(
             chat_id=user.id,
             text=f"Чтобы вступить в <b>{chat.title}</b>, решите задачу:\n\n<b>{question}</b>\n\nУ вас 5 минут.",
             reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except Exception as e:
-        logger.error(f"Ошибка отправки капчи: {e}")
-        context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
+        logger.error(f"Не удалось отправить капчу {user.id}: {e}")
+        await context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
 
-def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not application:
-        return
+async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
 
     data = query.data.split("_")
     if len(data) != 3 or data[0] != "captcha":
@@ -133,86 +107,76 @@ def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = int(data[2])
 
     if user_id != query.from_user.id or user_id not in pending_requests:
-        query.edit_message_text("Ошибка.")
+        await query.edit_message_text("Ошибка или время истекло.")
         return
 
     info = pending_requests[user_id]
     if datetime.now() > info["expires"]:
-        query.edit_message_text("⏰ Время истекло.")
+        await query.edit_message_text("⏰ Время истекло.")
         del pending_requests[user_id]
-        context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
+        await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user_id)
         return
 
     user = query.from_user
     if chosen == info["answer"]:
-        context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
+        await context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
         add_user(user.id, user.username or "None", user.full_name)
 
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"t.me/{context.bot.get_me().username}")]])
-        query.edit_message_text("✅ Пройдено! Вы в группе.\n\nНажмите /start у бота.", reply_markup=keyboard)
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start в чате со мной", url=f"t.me/{(await context.bot.get_me()).username}")]])
+        await query.edit_message_text(
+            "✅ Капча пройдена! Вы добавлены в группу.\n\nЧтобы получать персональные уведомления, нажмите кнопку ниже и отправьте /start.",
+            reply_markup=keyboard
+        )
     else:
-        context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
-        query.edit_message_text("❌ Неправильно.")
+        await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
+        await query.edit_message_text("❌ Неправильно. Заявка отклонена.")
 
     del pending_requests[user_id]
 
-def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username or "None", user.full_name)
-    update.message.reply_text("Привет! Теперь могу писать тебе.")
+    await update.message.reply_text("Привет! Теперь я могу писать тебе персональные сообщения.")
 
-def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    update.message.reply_text(f"Собрано пользователей: {get_users_count()}")
+    await update.message.reply_text(f"Собрано пользователей: {get_users_count()}")
 
-def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
+
     if not context.args:
-        update.message.reply_text("Использование: /broadcast текст")
+        await update.message.reply_text("Использование: /broadcast Твой текст рассылки")
         return
 
     text = " ".join(context.args)
     user_ids = get_all_user_ids()
-    success = failed = 0
+    success = 0
+    failed = 0
+
+    await update.message.reply_text(f"Начинаю рассылку {len(user_ids)} пользователям...")
+
     for uid in user_ids:
         try:
-            context.bot.send_message(uid, text)
+            await context.bot.send_message(chat_id=uid, text=text, disable_web_page_preview=True)
             success += 1
-        except:
+        except Exception as e:
+            logger.warning(f"Не удалось отправить {uid}: {e}")
             failed += 1
-    update.message.reply_text(f"Готово! Успешно: {success}, Не удалось: {failed}")
+
+        await asyncio.sleep(0.05)  # Чтобы не превысить лимиты Telegram (~20 сообщений в секунду)
+
+    await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
 
 # Регистрация обработчиков
-if application:
-    application.add_handler(ChatJoinRequestHandler(handle_join_request))
-    application.add_handler(CallbackQueryHandler(captcha_callback, pattern=r"^captcha_"))
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("broadcast", broadcast))
+application.add_handler(ChatJoinRequestHandler(handle_join_request))
+application.add_handler(CallbackQueryHandler(captcha_callback, pattern=r"^captcha_"))
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("stats", stats))
+application.add_handler(CommandHandler("broadcast", broadcast))
 
-    init_db()
+init_db()
 
-# ==================== WEBHOOK ====================
-@app.route(f"/webhook/{WEBHOOK_SECRET}", methods=["POST"])
-def webhook():
-    if application is None:
-        return "Telegram отключён - нет токена", 503
-
-    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
-        abort(403)
-
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    application.process_update(update)
-    return "OK"
-
-@app.route("/")
-def index():
-    if application is None:
-        return "Сервер работает, но Telegram отключён (добавь TELEGRAM_BOT_TOKEN в Secrets)"
-    return "Бот работает!"
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+application.run_polling()  # ← Polling вместо webhook
