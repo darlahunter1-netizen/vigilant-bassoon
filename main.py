@@ -180,3 +180,8 @@ application.add_handler(CommandHandler("broadcast", broadcast))
 init_db()
 
 application.run_polling()  # ← Polling вместо webhook
+
+@app.route("/")
+def index():
+    return "Bot is alive! 🚀", 200
+
