@@ -28,6 +28,13 @@ flask_app = Flask(__name__)
 def health():
     return jsonify({"status": "ok", "message": "Bot is running! 🚀"}), 200
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text(f"Пользователей в базе: {get_users_count()}")
+
+application.add_handler(CommandHandler("stats", stats))
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -134,3 +141,4 @@ if __name__ == "__main__":
     Thread(target=run_polling, daemon=True).start()
     port = int(os.getenv("PORT", 8080))
     flask_app.run(host="0.0.0.0", port=port, debug=False)
+
