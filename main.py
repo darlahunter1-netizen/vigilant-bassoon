@@ -12,11 +12,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # ← добавь в Secrets!
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # ← Добавь в Secrets!
 
-GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
+GROUP_CHAT_ID = -1003431090434  # Твой ID группы
 
-ADMIN_ID = 998091317  # ← ЗАМЕНИ
+ADMIN_ID = 998091317  # Твой ID
 
 DB_FILE = "users.db"
 # ===================================================
@@ -24,7 +24,6 @@ DB_FILE = "users.db"
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask для health check (Replit требует порт)
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -35,7 +34,6 @@ def run_flask():
     port = int(os.getenv("PORT", 5000))
     flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-# Telegram бот
 application = Application.builder().token(TOKEN).build()
 
 # База данных
@@ -58,22 +56,6 @@ def add_user(user_id: int, username: str, full_name: str):
               (user_id, username, full_name, datetime.now()))
     conn.commit()
     conn.close()
-
-def get_all_user_ids():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    rows = c.fetchall()
-    conn.close()
-    return [row[0] for row in rows]
-
-def get_users_count():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users")
-    count = c.fetchone()[0]
-    conn.close()
-    return count
 
 # Капча
 pending_requests = {}
@@ -136,14 +118,29 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = query.from_user
     if chosen == info["answer"]:
-        await context.bot.approve_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
+        # НЕ одобряем автоматически — просто приветствие
         add_user(user.id, user.username or "None", user.full_name)
 
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"t.me/{(await context.bot.get_me()).username}")]])
-        await query.edit_message_text(
-            "✅ Пройдено! Вы в группе.\n\nЧтобы получать сообщения, нажмите кнопку и отправьте /start.",
-            reply_markup=keyboard
+        # Красивое приветственное сообщение с картинкой
+        welcome_text = (
+            "🎉 <b>Поздравляем!</b> 🎉\n\n"
+            "Ваша заявка успешно прошла проверку и <b>находится в обработке</b>!\n\n"
+            "Мы проверим её в ближайшее время и добавим вас в эксклюзивное сообщество ShortsBlast 🚀\n"
+            "Пока ждёшь — держи мотивацию и полезные советы по взлёту Shorts 👇\n\n"
+            "Оставайся на связи!"
         )
+
+        # Красивая картинка (замени ссылку на свою, если хочешь)
+        photo_url = "https://i.imgur.com/0Z8Z8Z8.jpeg"  # Пример — космическая мотивация, найди свою
+
+        await context.bot.send_photo(
+            chat_id=user.id,
+            photo=photo_url,
+            caption=welcome_text,
+            parse_mode="HTML"
+        )
+
+        await query.edit_message_text("✅ Капча пройдена! Ожидай добавления в группу.")
     else:
         await context.bot.decline_chat_join_request(chat_id=info["chat_id"], user_id=user.id)
         await query.edit_message_text("❌ Неправильно.")
@@ -153,50 +150,18 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username or "None", user.full_name)
-    await update.message.reply_text("Привет! Теперь я могу писать тебе.")
+    await update.message.reply_text("Привет! Теперь я могу писать тебе персональные сообщения.")
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await update.message.reply_text(f"Собрано пользователей: {get_users_count()}")
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    if not context.args:
-        await update.message.reply_text("Использование: /broadcast текст")
-        return
-
-    text = " ".join(context.args)
-    user_ids = get_all_user_ids()
-    success = failed = 0
-
-    await update.message.reply_text(f"Рассылка {len(user_ids)} пользователям...")
-
-    for uid in user_ids:
-        try:
-            await context.bot.send_message(chat_id=uid, text=text)
-            success += 1
-        except Exception as e:
-            logger.warning(f"Не удалось отправить {uid}: {e}")
-            failed += 1
-        await asyncio.sleep(0.05)
-
-    await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
-
-# Регистрация
+# Регистрация обработчиков
 application.add_handler(ChatJoinRequestHandler(handle_join_request))
 application.add_handler(CallbackQueryHandler(captcha_callback, pattern=r"^captcha_"))
 application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("stats", stats))
-application.add_handler(CommandHandler("broadcast", broadcast))
 
 init_db()
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    # Запуск Flask в фоне
+    # Flask в фоне
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
