@@ -179,7 +179,6 @@ application.add_handler(CommandHandler("broadcast", broadcast))
 
 init_db()
 
-application.run_polling()  # ← Polling вместо webhook
 
 # ... (весь твой код polling, handlers, init_db и т.д. остаётся выше)
 
@@ -205,5 +204,6 @@ if __name__ == "__main__":
 
     # Запускаем polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 
