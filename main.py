@@ -8,7 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, ContextTypes, CommandHandler, CallbackQueryHandler, ChatJoinRequestHandler
 
 # ==================== НАСТРОЙКИ ====================
-TOKEN = "8356905419:AAHWfxbaCn_vEfg2AC0Q9KWS9m1OiyL-gp8"  # ← твой токен (лучше в Secrets)
+TOKEN = "8356905419:AAHWfxbaCn_vEfg2AC0Q9KWS9m1OiyL-gp8"  # ← твой токен
 
 GROUP_CHAT_ID = -1003431090434          # ← замени на ID своей группы
 
@@ -128,7 +128,7 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Нажми /start", url=f"t.me/{(await context.bot.get_me()).username}")]])
         await query.edit_message_text(
-            "✅ Пройдено! Вы в группе.\n\nЧтобы получать сообщения, нажмите кнопку и отправьте /start.",
+            "✅ Пройдено! Вы в группе.\n\nЧтобы получать персональные сообщения, нажмите кнопку и отправьте /start.",
             reply_markup=keyboard
         )
     else:
@@ -152,7 +152,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Использование: /broadcast текст")
+        await update.message.reply_text("Использование: /broadcast Твой текст")
         return
 
     text = " ".join(context.args)
@@ -168,7 +168,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Не удалось отправить {uid}: {e}")
             failed += 1
-        await asyncio.sleep(0.05)  # Анти-флуд
+        await asyncio.sleep(0.05)
 
     await update.message.reply_text(f"Рассылка завершена!\nУспешно: {success}\nНе удалось: {failed}")
 
@@ -183,4 +183,9 @@ init_db()
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        poll_interval=1.0,
+        timeout=10
+    )
