@@ -206,24 +206,43 @@ application.add_handler(CommandHandler("broadcast", broadcast))
 init_db()
 
 
-# ==================== ПОЛЛИНГ В ФОНЕ ====================
+# ... весь остальной код остаётся прежним (импорты, настройки, handlers, Flask, функции и т.д.) ...
+
+import asyncio
+
+# ==================== ПОЛЛИНГ В ОТДЕЛЬНОМ ПОТОКЕ С СОБСТВЕННЫМ EVENT LOOP ====================
 def run_polling():
-    logger.info("Telegram polling запущен в фоновом потоке")
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        drop_pending_updates=True,
-        poll_interval=1.0,
-        timeout=10
-    )
+    logger.info("Запуск Telegram polling в фоновом потоке с новым event loop")
+    
+    # Создаём новый event loop специально для этого потока
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Запускаем polling синхронно внутри этого loop
+        loop.run_until_complete(application.initialize())
+        loop.run_until_complete(application.start())
+        
+        # Бесконечный цикл polling (аналог run_polling, но вручную)
+        loop.run_forever()
+    except Exception as e:
+        logger.error(f"Polling упал: {e}")
+    finally:
+        loop.run_until_complete(application.stop())
+        loop.run_until_complete(application.shutdown())
+        loop.close()
 
 
 # ==================== ЗАПУСК ====================
 if __name__ == "__main__":
-    # Запускаем polling в отдельном потоке
+    init_db()
+
+    # Запускаем polling в фоне
     polling_thread = Thread(target=run_polling, daemon=True)
     polling_thread.start()
 
     # Flask — основной процесс (Replit Autoscale этого ждёт)
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 8080))  # Replit сам подставит нужный порт
     logger.info(f"Flask стартует на порту {port}")
     flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
