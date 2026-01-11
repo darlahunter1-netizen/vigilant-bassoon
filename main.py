@@ -211,7 +211,11 @@ def run_polling():
         loop.run_until_complete(application.stop())
         loop.run_until_complete(application.shutdown())
         loop.close()
+async def debug_echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text if update.message else "не текст"
+    await update.message.reply_text(f"Я тебя услышал! Получено: {text}\n\nРаботаю нормально.")
 
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, debug_echo))
 if __name__ == "__main__":
     polling_thread = Thread(target=run_polling, daemon=True)
     polling_thread.start()
@@ -219,3 +223,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logger.info(f"Flask на {port}")
     flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
